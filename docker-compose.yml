@@ -1,0 +1,40 @@
+version: '3'
+
+services:
+  mongodb:
+    build: ./mongodb
+    container_name: mongodb
+    ports:
+      - "27017:27017"       
+    environment:
+      - MONGO_INITDB_DATABASE=sampledb
+    networks:
+      - app-network
+
+  backend:
+    build: ./backend
+    container_name: backend
+    ports:
+      - "4000:4000"         
+    environment:
+      - DB_HOST=mongodb     
+      - DB_PORT=27017
+      - DB_NAME=sampledb
+    depends_on:
+      - mongodb 
+    networks:
+      - app-network
+
+  frontend:
+    build: ./frontend
+    container_name: frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge

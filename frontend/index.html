@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Three-Tier Application - Advanced Frontend</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+    section {
+      margin-bottom: 30px;
+      padding: 15px;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+    }
+    h2 {
+      margin-top: 0;
+    }
+    label {
+      display: block;
+      margin-top: 10px;
+    }
+    input[type="text"], input[type="number"] {
+      width: 200px;
+      padding: 5px;
+      margin-top: 5px;
+    }
+    button {
+      margin-top: 10px;
+      padding: 5px 10px;
+      cursor: pointer;
+    }
+    .data-item {
+      border-bottom: 1px solid #ddd;
+      padding: 5px 0;
+    }
+    .data-item button {
+      margin-left: 10px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Three-Tier Application - Advanced Frontend</h1>
+  
+  <section id="list-section">
+    <h2>All Test Data</h2>
+    <button id="loadDataBtn">Load All Data</button>
+    <div id="dataList"></div>
+  </section>
+  
+  <section id="fetch-section">
+    <h2>Fetch Specific Data</h2>
+    <label for="fetchValue">Enter Value:</label>
+    <input type="number" id="fetchValue" placeholder="Enter value">
+    <button id="fetchBtn">Fetch Data</button>
+    <div id="fetchResult"></div>
+  </section>
+  
+  <section id="create-section">
+    <h2>Create New Data</h2>
+    <form id="createForm">
+      <label for="createName">Name:</label>
+      <input type="text" id="createName" required placeholder="Enter name">
+      
+      <label for="createValue">Value:</label>
+      <input type="number" id="createValue" required placeholder="Enter value">
+      
+      <button type="submit">Create Data</button>
+    </form>
+    <div id="createResult"></div>
+  </section>
+  
+  <section id="update-section">
+    <h2>Update Data</h2>
+    <form id="updateForm">
+      <label for="originalValue">Original Value (ID):</label>
+      <input type="number" id="originalValue" required placeholder="Enter original value">
+      
+      <label for="updateName">New Name:</label>
+      <input type="text" id="updateName" required placeholder="Enter new name">
+      
+      <label for="updateValue">New Value (optional):</label>
+      <input type="number" id="updateValue" placeholder="Enter new value">
+      
+      <button type="submit">Update Data</button>
+    </form>
+    <div id="updateResult"></div>
+  </section>
+  
+  <script>
+    async function loadAllData() {
+      try {
+        const response = await fetch('/api/testdata');
+        const data = await response.json();
+        const dataList = document.getElementById('dataList');
+        dataList.innerHTML = '';
+        if (data.length === 0) {
+          dataList.innerHTML = '<p>No data found.</p>';
+          return;
+        }
+        data.forEach(item => {
+          const div = document.createElement('div');
+          div.className = 'data-item';
+          div.innerHTML = `Name: ${item.name}, Value: ${item.value}`;
+          const selectBtn = document.createElement('button');
+          selectBtn.textContent = 'Select';
+          selectBtn.onclick = () => {
+            document.getElementById('originalValue').value = item.value;
+            document.getElementById('updateName').value = item.name;
+          };
+          div.appendChild(selectBtn);
+          dataList.appendChild(div);
+        });
+      } catch (err) {
+        console.error('Error loading data:', err);
+      }
+    }
+    
+    document.getElementById('loadDataBtn').addEventListener('click', loadAllData);
+    
+    document.getElementById('fetchBtn').addEventListener('click', async () => {
+      const value = document.getElementById('fetchValue').value;
+      if (!value) {
+        alert('Please enter a value.');
+        return;
+      }
+      try {
+        const response = await fetch(`/api/testdata/${value}`);
+        if (response.status === 404) {
+          document.getElementById('fetchResult').innerHTML = '<p>Data not found.</p>';
+          return;
+        }
+        const data = await response.json();
+        document.getElementById('fetchResult').innerHTML = `<p>Name: ${data.name}, Value: ${data.value}</p>`;
+      } catch (err) {
+        console.error('Error fetching specific data:', err);
+      }
+    });
+    
+    document.getElementById('createForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const name = document.getElementById('createName').value;
+      const value = document.getElementById('createValue').value;
+      try {
+        const response = await fetch('/api/testdata', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, value: parseInt(value) })
+        });
+        const result = await response.json();
+        document.getElementById('createResult').innerHTML = `<p>Created: Name: ${result.name}, Value: ${result.value}</p>`;
+        loadAllData();
+      } catch (err) {
+        console.error('Error creating data:', err);
+      }
+    });
+    
+    document.getElementById('updateForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const originalValue = document.getElementById('originalValue').value;
+      const updateName = document.getElementById('updateName').value;
+      const updateValue = document.getElementById('updateValue').value;
+      
+      const updatePayload = { name: updateName };
+      if (updateValue) {
+        updatePayload.value = parseInt(updateValue);
+      }
+      
+      try {
+        const response = await fetch(`/api/testdata/update/${originalValue}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatePayload)
+        });
+        const result = await response.json();
+        document.getElementById('updateResult').innerHTML = `<p>Updated: Name: ${result.name}, Value: ${result.value}</p>`;
+        loadAllData();
+      } catch (err) {
+        console.error('Error updating data:', err);
+      }
+    });
+    
+    window.onload = loadAllData;
+  </script>
+</body>
+</html>
