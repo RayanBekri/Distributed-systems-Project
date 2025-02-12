@@ -3,13 +3,13 @@ const bodyParser = require('body-parser');
 const { MongoClient } = require('mongodb');
 
 const app = express();
-const port = process.env.PORT || 4000;
+const port = 4000;
 
 app.use(bodyParser.json());
 
-const dbHost = process.env.DB_HOST || 'mongodb';
-const dbPort = process.env.DB_PORT || 27017;
-const dbName = process.env.DB_NAME || 'sampledb';
+const dbHost ='mongodb';
+const dbPort = 27017;
+const dbName ='sampledb';
 const url = `mongodb://${dbHost}:${dbPort}`;
 
 let db;
