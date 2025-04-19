@@ -1,40 +1,70 @@
-version: '3'
+version: '3.8'
+
+networks:
+  ds-net:
+    driver: bridge
 
 services:
   mongodb:
     build: ./mongodb
     container_name: mongodb
-    ports:
-      - "27017:27017"       
     environment:
       - MONGO_INITDB_DATABASE=sampledb
+    volumes:
+      - mongo_data:/data/db
     networks:
-      - app-network
+      - ds-net
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: user
+      RABBITMQ_DEFAULT_PASS: password
+    ports:
+      - "15672:15672"  # management UI only
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - ds-net
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   backend:
     build: ./backend
     container_name: backend
-    ports:
-      - "4000:4000"         
-    environment:
-      - DB_HOST=mongodb     
-      - DB_PORT=27017
-      - DB_NAME=sampledb
     depends_on:
-      - mongodb 
+      - mongodb
+      - rabbitmq
+    environment:
+      MONGO_URL:   mongodb://mongodb:27017/sampledb
+      RABBITMQ_URL: amqp://user:password@rabbitmq:5672
     networks:
-      - app-network
+      - ds-net
+
+  worker:
+    build: ./worker
+    container_name: worker
+    depends_on:
+      - rabbitmq
+    environment:
+      RABBITMQ_URL: amqp://user:password@rabbitmq:5672
+    networks:
+      - ds-net
 
   frontend:
     build: ./frontend
     container_name: frontend
-    ports:
-      - "3000:80"
     depends_on:
       - backend
+    ports:
+      - "80:80"
     networks:
-      - app-network
+      - ds-net
 
-networks:
-  app-network:
-    driver: bridge
+volumes:
+  mongo_data:
+  rabbitmq_data:
