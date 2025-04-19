@@ -1,5 +1,3 @@
-// backend/server.js
-
 const express    = require('express');
 const bodyParser = require('body-parser');
 const { MongoClient } = require('mongodb');
@@ -9,7 +7,6 @@ const app  = express();
 const port = 4000;
 app.use(bodyParser.json());
 
-// ─── Configuration ────────────────────────────────────────────────────────────
 const dbHost   = 'mongodb';
 const dbPort   = 27017;
 const dbName   = 'sampledb';
@@ -20,14 +17,11 @@ const queue     = 'task_queue';
 
 let db, rabbitChannel;
 
-// ─── Initialization ───────────────────────────────────────────────────────────
 async function init() {
-  // MongoDB
   const client = await MongoClient.connect(mongoUrl);
   db = client.db(dbName);
   console.log('✔ MongoDB connected');
 
-  // RabbitMQ (with retries)
   const maxRetries = 5, delayMs = 5000;
   for (let i = 1; i <= maxRetries; i++) {
     try {
@@ -52,7 +46,6 @@ init().catch(err => {
   process.exit(1);
 });
 
-// ─── Helper to enqueue & log ──────────────────────────────────────────────────
 function enqueueCall(type) {
   if (!rabbitChannel) return;
   const msg = { status: 'queued', task: type };
@@ -60,9 +53,7 @@ function enqueueCall(type) {
   console.log(msg);
 }
 
-// ─── API Routes ────────────────────────────────────────────────────────────────
 
-// 1) List all testData
 app.get('/api/testdata', async (req, res) => {
   enqueueCall('get-call');
   try {
@@ -73,7 +64,6 @@ app.get('/api/testdata', async (req, res) => {
   }
 });
 
-// 2) Get one item by value
 app.get('/api/testdata/:value', async (req, res) => {
   enqueueCall('get-call');
   try {
@@ -86,7 +76,6 @@ app.get('/api/testdata/:value', async (req, res) => {
   }
 });
 
-// 3) Create new testData
 app.post('/api/testdata', async (req, res) => {
   enqueueCall('post-call');
   try {
@@ -98,7 +87,6 @@ app.post('/api/testdata', async (req, res) => {
   }
 });
 
-// 4) Update existing testData by value
 app.post('/api/testdata/update/:value', async (req, res) => {
   enqueueCall('post-call');
   try {
@@ -115,7 +103,6 @@ app.post('/api/testdata/update/:value', async (req, res) => {
   }
 });
 
-// ─── Start server ──────────────────────────────────────────────────────────────
 app.listen(port, () => {
   console.log(`Backend server running on port ${port}`);
 });
