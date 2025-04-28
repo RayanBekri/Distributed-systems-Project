@@ -1,16 +1,18 @@
 {
-    "name": "backend",
-    "version": "1.0.0",
-    "description": "Backend",
-    "main": "server.js",
-    "scripts": {
-      "start": "node server.js"
-    },
-    "dependencies": {
-      "body-parser": "^1.20.1",
-      "express": "^4.18.2",
-      "mongodb": "^4.12.1",
-      "amqplib":  "^0.8.0"
-    }
+  "name": "backend-services",
+  "version": "1.0.0",
+  "description": "Multi‐service backend for testData CRUD",
+  "private": true,
+  "scripts": {
+    "start:getall": "node services/getall/server.js",
+    "start:getone": "node services/getone/server.js",
+    "start:create": "node services/create/server.js",
+    "start:update": "node services/update/server.js"
+  },
+  "dependencies": {
+    "body-parser": "^1.20.1",
+    "express":      "^4.18.2",
+    "mongodb":      "^4.12.1",
+    "amqplib":      "^0.8.0"
   }
-  
+}

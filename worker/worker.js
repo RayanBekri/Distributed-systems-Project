@@ -1,48 +1,59 @@
 const amqp = require('amqplib');
+const fs   = require('fs');
 
-const rabbitUrl = process.env.RABBITMQ_URL || 'amqp://user:password@rabbitmq:5672';
-const queue     = 'task_queue';
+const INSTANCE   = 'worker';
+const RABBIT_HOST = 'rabbitmq';
+const RABBIT_PORT = 5672;
+const RABBIT_USER = 'user';
+const RABBIT_PASS = 'password';
+const RABBIT_URL  = `amqp://${RABBIT_USER}:${RABBIT_PASS}@${RABBIT_HOST}:${RABBIT_PORT}`;
+const QUEUE       = 'task_queue';
 
-async function init() {
-  let conn, ch;
-  const maxRetries = 5;
-  const delayMs    = 5000;
+const logFilePath = 'worker.log';
+const logStream   = fs.createWriteStream(logFilePath, { flags: 'a' });
 
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+(async function init() {
+  let channel;
+  const max   = 5;
+  const delay = 5000;
+
+  for (let i = 1; i <= max; i++) {
     try {
-      conn = await amqp.connect(rabbitUrl);
-      ch   = await conn.createChannel();
-      await ch.assertQueue(queue, { durable: true });
-      console.log('✔ RabbitMQ connected');
+      const conn = await amqp.connect(RABBIT_URL);
+      channel    = await conn.createChannel();
+      await channel.assertQueue(QUEUE, { durable: true });
+      console.log(`✔ [${INSTANCE}] Connected to RabbitMQ at ${RABBIT_URL}`);
       break;
     } catch (err) {
-      console.log(`RabbitMQ connection ${attempt}/${maxRetries} failed, retrying in ${delayMs/1000}s…`);
-      if (attempt === maxRetries) {
-        console.error('❌ Cannot connect to RabbitMQ:', err);
-        process.exit(1);
-      }
-      await new Promise(res => setTimeout(res, delayMs));
+      console.error(`❌ [${INSTANCE}] Attempt ${i}/${max} failed:`, err.message);
+      if (i === max) process.exit(1);
+      await new Promise(r => setTimeout(r, delay));
     }
   }
 
-  ch.prefetch(1);
-  console.log('Worker waiting for messages…');
-  ch.consume(
-    queue,
-    msg => {
-      const { task } = JSON.parse(msg.content.toString());
-      console.log('→ Received task:', task);
+  channel.prefetch(1);
+  console.log(`👂 [${INSTANCE}] Waiting for messages…`);
 
-      setTimeout(() => {
-        console.log('✔ Done:', task);
-        ch.ack(msg);
-      }, 1000);
-    },
-    { noAck: false }
-  );
-}
+  channel.consume(QUEUE, async msg => {
+    const payload = JSON.parse(msg.content.toString());
+    const logEntry = {
+      receivedAt: new Date().toISOString(),
+      ...payload
+    };
 
-init().catch(err => {
-  console.error('Worker initialization error:', err);
-  process.exit(1);
-});
+    console.log(`→ [${INSTANCE}] Received`, payload);
+
+    logStream.write(JSON.stringify(logEntry) + '\n');
+
+    await new Promise(r => setTimeout(r, 1000));
+
+    console.log(`✔ [${INSTANCE}] Done processing '${payload.service}'`);
+    logStream.write(JSON.stringify({
+      processedAt: new Date().toISOString(),
+      service: payload.service,
+      instance: INSTANCE
+    }) + '\n');
+
+    channel.ack(msg);
+  }, { noAck: false });
+})();

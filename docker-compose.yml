@@ -1,17 +1,67 @@
 version: '3.8'
-
 networks:
   ds-net:
     driver: bridge
 
 services:
-  mongodb:
-    build: ./mongodb
-    container_name: mongodb
-    environment:
-      - MONGO_INITDB_DATABASE=sampledb
+  mongo-primary:
+    image: mongo:6.0
+    container_name: mongo-primary
+    ports:
+      - "27017:27017"
     volumes:
-      - mongo_data:/data/db
+      - mongo-primary-data:/data/db
+    command:
+      - "--replSet"
+      - "rs0"
+      - "--bind_ip_all"
+    networks:
+      - ds-net
+
+  mongo-replica1:
+    image: mongo:6.0
+    container_name: mongo-replica1
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo-replica1-data:/data/db
+    command:
+      - "--replSet"
+      - "rs0"
+      - "--bind_ip_all"
+    depends_on:
+      - mongo-primary
+    networks:
+      - ds-net
+
+  mongo-replica2:
+    image: mongo:6.0
+    container_name: mongo-replica2
+    ports:
+      - "27019:27017"
+    volumes:
+      - mongo-replica2-data:/data/db
+    command:
+      - "--replSet"
+      - "rs0"
+      - "--bind_ip_all"
+    depends_on:
+      - mongo-primary
+    networks:
+      - ds-net
+
+  mongo-init:
+    image: mongo:6.0
+    container_name: mongo-init
+    depends_on:
+      - mongo-primary
+      - mongo-replica1
+      - mongo-replica2
+    volumes:
+      - ./db:/scripts
+    entrypoint:
+      - bash
+      - /scripts/init-replica-set.sh
     networks:
       - ds-net
 
@@ -22,26 +72,142 @@ services:
       RABBITMQ_DEFAULT_USER: user
       RABBITMQ_DEFAULT_PASS: password
     ports:
-      - "15672:15672"  # management UI only
+      - "15672:15672"
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
-    networks:
-      - ds-net
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      test: ["CMD","rabbitmq-diagnostics","ping"]
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - ds-net
 
-  backend:
+  backend-getall:
     build: ./backend
-    container_name: backend
-    depends_on:
-      - mongodb
-      - rabbitmq
+    container_name: backend-getall
     environment:
-      MONGO_URL:   mongodb://mongodb:27017/sampledb
-      RABBITMQ_URL: amqp://user:password@rabbitmq:5672
+      - PORT=4000
+      - INSTANCE=getall
+    command:
+      - npm
+      - run
+      - start:getall
+    depends_on:
+      - mongo-primary
+      - rabbitmq
+    networks:
+      - ds-net
+
+  backend-getone:
+    build: ./backend
+    container_name: backend-getone
+    environment:
+      - PORT=4001
+      - INSTANCE=getone
+    command:
+      - npm
+      - run
+      - start:getone
+    depends_on:
+      - mongo-primary
+      - rabbitmq
+    networks:
+      - ds-net
+
+  backend-create:
+    build: ./backend
+    container_name: backend-create
+    environment:
+      - PORT=4002
+      - INSTANCE=create
+    command:
+      - npm
+      - run
+      - start:create
+    depends_on:
+      - mongo-primary
+      - rabbitmq
+    networks:
+      - ds-net
+
+  backend-update:
+    build: ./backend
+    container_name: backend-update
+    environment:
+      - PORT=4003
+      - INSTANCE=update
+    command:
+      - npm
+      - run
+      - start:update
+    depends_on:
+      - mongo-primary
+      - rabbitmq
+    networks:
+      - ds-net
+
+  backend-getall-backup:
+    build: ./backend
+    container_name: backend-getall-backup
+    environment:
+      - PORT=4000
+      - INSTANCE=getall-backup
+    command:
+      - npm
+      - run
+      - start:getall
+    depends_on:
+      - mongo-primary
+      - rabbitmq
+    networks:
+      - ds-net
+
+  backend-getone-backup:
+    build: ./backend
+    container_name: backend-getone-backup
+    environment:
+      - PORT=4001
+      - INSTANCE=getone-backup
+    command:
+      - npm
+      - run
+      - start:getone
+    depends_on:
+      - mongo-primary
+      - rabbitmq
+    networks:
+      - ds-net
+
+  backend-create-backup:
+    build: ./backend
+    container_name: backend-create-backup
+    environment:
+      - PORT=4002
+      - INSTANCE=create-backup
+    command:
+      - npm
+      - run
+      - start:create
+    depends_on:
+      - mongo-primary
+      - rabbitmq
+    networks:
+      - ds-net
+
+  backend-update-backup:
+    build: ./backend
+    container_name: backend-update-backup
+    environment:
+      - PORT=4003
+      - INSTANCE=update-backup
+    command:
+      - npm
+      - run
+      - start:update
+    depends_on:
+      - mongo-primary
+      - rabbitmq
     networks:
       - ds-net
 
@@ -50,21 +216,34 @@ services:
     container_name: worker
     depends_on:
       - rabbitmq
-    environment:
-      RABBITMQ_URL: amqp://user:password@rabbitmq:5672
+    networks:
+      - ds-net
+
+  nginx:
+    build: ./nginx
+    container_name: nginx
+    ports:
+      - "80:80"
+    depends_on:
+      - backend-getall
+      - backend-getone
+      - backend-create
+      - backend-update
     networks:
       - ds-net
 
   frontend:
     build: ./frontend
     container_name: frontend
-    depends_on:
-      - backend
     ports:
-      - "80:80"
+      - "8080:80"
+    depends_on:
+      - nginx
     networks:
       - ds-net
 
 volumes:
-  mongo_data:
+  mongo-primary-data:
+  mongo-replica1-data:
+  mongo-replica2-data:
   rabbitmq_data:
