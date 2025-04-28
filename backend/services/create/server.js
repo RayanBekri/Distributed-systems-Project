@@ -1,64 +1,105 @@
-const express    = require('express');
+const express = require('express');
 const bodyParser = require('body-parser');
 const { MongoClient } = require('mongodb');
-const amqp       = require('amqplib');
+const amqp = require('amqplib');
+const os = require('os');
 
-const app      = express();
-const port     = process.env.PORT     || 4002;
-const INSTANCE = process.env.INSTANCE || 'create';
+const app = express();
+const PORT = process.env.PORT || 4002;
+const INSTANCE = process.env.INSTANCE_ID || os.hostname();
 
-const MONGO_URL = `mongodb://mongo-primary:27017/sampledb`;
-const RABBIT_URL = `amqp://user:password@rabbitmq:5672`;
-const QUEUE     = 'task_queue';
+const MONGO_HOSTS = [
+  'mongo-primary:27017',
+  'mongo-replica1:27017',
+  'mongo-replica2:27017'
+];
+const DB_NAME = 'sampledb';
+const RABBIT_URL = 'amqp://user:password@rabbitmq:5672';
+const QUEUE = 'task_queue';
 
 let db, rabbitChannel;
 
-async function init() {
-  const client = await MongoClient.connect(MONGO_URL, { useNewUrlParser: true, useUnifiedTopology: true });
-  db = client.db();
-  console.log(`✔ [${INSTANCE}] Connected to MongoDB`);
+async function connectToMongo() {
+  const maxRetries = 5, delay = 2000;
+  for (let i = 1; i <= maxRetries; i++) {
+    for (const host of MONGO_HOSTS) {
+      try {
+        const client = await MongoClient.connect(
+          `mongodb://${host}/${DB_NAME}`,
+          { useNewUrlParser: true, useUnifiedTopology: true }
+        );
+        db = client.db(DB_NAME);
+        console.log(`✔ [${INSTANCE}] MongoDB connected to ${host}`);
+        return;
+      } catch (err) {
+        console.warn(`❌ [${INSTANCE}] MongoDB ${host} failed (${i}): ${err.message}`);
+      }
+    }
+    console.log(`⏳ [${INSTANCE}] Mongo retry ${i}/${maxRetries}`);
+    await new Promise(r => setTimeout(r, delay));
+  }
+  process.exit(1);
+}
 
-  const maxRetries = 5, delayMs = 5000;
+async function connectToRabbit() {
+  const maxRetries = 5, delay = 2000;
   for (let i = 1; i <= maxRetries; i++) {
     try {
       const conn = await amqp.connect(RABBIT_URL);
       rabbitChannel = await conn.createChannel();
       await rabbitChannel.assertQueue(QUEUE, { durable: true });
-      console.log(`✔ [${INSTANCE}] Connected to RabbitMQ`);
-      break;
+      console.log(`✔ [${INSTANCE}] RabbitMQ connected`);
+      return;
     } catch (err) {
-      console.error(`❌ [${INSTANCE}] RabbitMQ attempt ${i}/${maxRetries} failed: ${err.message}`);
-      if (i === maxRetries) process.exit(1);
-      await new Promise(r => setTimeout(r, delayMs));
+      console.warn(`❌ [${INSTANCE}] RabbitMQ failed (${i}): ${err.message}`);
+      await new Promise(r => setTimeout(r, delay));
     }
   }
-}
-init().catch(err => {
-  console.error(`❌ [${INSTANCE}] Initialization error:`, err);
   process.exit(1);
-});
+}
 
-function enqueueCall(task) {
-  if (!rabbitChannel) return;
-  const msg = { service: INSTANCE, task, timestamp: new Date().toISOString() };
+function enqueueCall(type, extra) {
+  const ip = (req => req.headers['x-forwarded-for'] || req.connection.remoteAddress)(app.request);
+  const msg = {
+    service: 'create',
+    instance: INSTANCE,
+    ip,
+    timestamp: new Date().toISOString(),
+    task: type,
+    ...extra
+  };
   rabbitChannel.sendToQueue(QUEUE, Buffer.from(JSON.stringify(msg)), { persistent: true });
   console.log(`→ [${INSTANCE}] Enqueued`, msg);
 }
 
+async function init() {
+  await connectToMongo();
+  await connectToRabbit();
+}
+
+init().catch(err => {
+  console.error(`❌ [${INSTANCE}] Init failed:`, err);
+  process.exit(1);
+});
+
 app.use(bodyParser.json());
 
+app.get('/health', (_, res) => {
+  res.send(`OK:${INSTANCE}`);
+});
+
 app.post('/api/testdata', async (req, res) => {
-  enqueueCall('create');
   const newItem = req.body;
+  enqueueCall('create', { item: newItem });
   try {
     const result = await db.collection('testData').insertOne(newItem);
     res.status(201).json(result.ops ? result.ops[0] : newItem);
   } catch (err) {
     console.error(`❌ [${INSTANCE}] DB error:`, err);
-    res.status(500).send(err.toString());
+    res.status(500).send(err.message);
   }
 });
 
-app.listen(port, () => {
-  console.log(`🚀 [${INSTANCE}] Listening on port ${port}`);
+app.listen(PORT, () => {
+  console.log(`🚀 [${INSTANCE}] create listening on ${PORT}`);
 });

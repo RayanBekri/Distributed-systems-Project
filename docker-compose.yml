@@ -7,8 +7,6 @@ services:
   mongo-primary:
     image: mongo:6.0
     container_name: mongo-primary
-    ports:
-      - "27017:27017"
     volumes:
       - mongo-primary-data:/data/db
     command:
@@ -21,8 +19,6 @@ services:
   mongo-replica1:
     image: mongo:6.0
     container_name: mongo-replica1
-    ports:
-      - "27018:27017"
     volumes:
       - mongo-replica1-data:/data/db
     command:
@@ -37,8 +33,6 @@ services:
   mongo-replica2:
     image: mongo:6.0
     container_name: mongo-replica2
-    ports:
-      - "27019:27017"
     volumes:
       - mongo-replica2-data:/data/db
     command:

@@ -1,117 +1,218 @@
-### 1. Create a private network
+# Distributed Systems Project
 
-```bash
-docker network create ds-net
-```
-- **What it does:** Makes a user‑defined bridge network named `ds-net` so containers can talk by name (e.g. `mongodb`, `rabbitmq`) without exposing ports externally.
+A fully containerized distributed system demonstrating:
 
----
-
-### 2. Create persistent volumes
-
-```bash
-docker volume create mongo_data
-docker volume create rabbitmq_data
-```
-- **What it does:** Allocates two named volumes, `mongo_data` for your MongoDB database files and `rabbitmq_data` for RabbitMQ’s queue data, so they survive container restarts.
+- **Message‐Oriented Architecture** with RabbitMQ (Producer/Consumer)  
+- **Horizontal Scaling** of backend microservices behind an NGINX load balancer  
+- **MongoDB Replica Set** for high availability  
+- **Fault Tolerance**, health checks, and persistence via Docker volumes  
 
 ---
 
-### 3. Build & run MongoDB (with `init-mongo.js` baked in)
+## Table of Contents
 
-```bash
-# Build a custom image from your mongodb/Dockerfile
-docker build -t custom-mongo ./mongodb
-
-# Run MongoDB, mounting the data volume and joining ds-net
-docker run -d \
-  --name mongodb \
-  --network ds-net \
-  -v mongo_data:/data/db \
-  custom-mongo
-```
-- **Key points:**
-  - Uses your `mongodb/Dockerfile` (which COPYs `init-mongo.js` into `/docker-entrypoint-initdb.d/`).
-  - On **first** startup, that script seeds `sampledb.testData`.
-  - Data persists in `mongo_data`.
-
----
-
-### 4. Run RabbitMQ (management UI only)
-
-```bash
-docker run -d \
-  --name rabbitmq \
-  --network ds-net \
-  -p 15672:15672 \
-  -e RABBITMQ_DEFAULT_USER=user \
-  -e RABBITMQ_DEFAULT_PASS=password \
-  -v rabbitmq_data:/var/lib/rabbitmq \
-  rabbitmq:3-management
-```
-- **Key points:**
-  - Exposes **only** the management UI on `15672`.
-  - Credentials set via env vars.
-  - Queue data persists in `rabbitmq_data`.
+1. [Prerequisites](#prerequisites)  
+2. [Folder Structure](#folder-structure)  
+3. [Quick Start (Docker Compose)](#quick-start-docker-compose)  
+4. [Service Overview & Ports](#service-overview--ports)  
+5. [Component Details](#component-details)  
+   - [MongoDB Replica Set](#mongodb-replica-set)  
+   - [RabbitMQ Broker](#rabbitmq-broker)  
+   - [Backend Microservices](#backend-microservices)  
+   - [Worker Service](#worker-service)  
+   - [Load Balancer (NGINX)](#load-balancer-nginx)  
+   - [Frontend UI](#frontend-ui)  
+6. [Scaling & Health](#scaling--health)  
+7. [Logs & Monitoring](#logs--monitoring)  
+8. [Troubleshooting](#troubleshooting)  
 
 ---
 
-### 5. Build & run Backend
+## Prerequisites
 
-```bash
-# Build your backend image
-docker build -t backend-image ./backend
-
-# Run backend, wiring it to MongoDB & RabbitMQ
-docker run -d \
-  --name backend \
-  --network ds-net \
-  -e MONGO_URL="mongodb://mongodb:27017/sampledb" \
-  -e RABBITMQ_URL="amqp://user:password@rabbitmq:5672" \
-  backend-image
-```
-- **Key points:**
-  - No ports exposed—frontend will call it over the private network.
-  - Knows where to find `mongodb` and `rabbitmq`.
+- Docker ≥ 20.10  
+- Docker Compose ≥ 1.29  
+- (Optional) `mongosh` for manual MongoDB inspection  
 
 ---
 
-### 6. Build & run Worker
+## Folder Structure
 
-```bash
-# Build your worker image
-docker build -t worker-image ./worker
-
-# Run worker on the same network
-docker run -d \
-  --name worker \
-  --network ds-net \
-  -e RABBITMQ_URL="amqp://user:password@rabbitmq:5672" \
-  worker-image
 ```
-- **Key points:**
-  - Listens on `task_queue` and processes jobs.
-  - No external ports needed.
+.
+├── backend/                 # Multi‐service backend
+│   ├── Dockerfile
+│   ├── package.json
+│   └── services/
+│       ├── getall/server.js
+│       ├── getone/server.js
+│       ├── create/server.js
+│       └── update/server.js
+│
+├── worker/                  # RabbitMQ consumer
+│   ├── Dockerfile
+│   ├── package.json
+│   └── worker.js
+│
+├── nginx/                   # Load balancer
+│   ├── Dockerfile
+│   └── nginx.conf
+│
+├── frontend/                # Static HTML UI (served by NGINX)
+│   ├── Dockerfile
+│   ├── default.conf
+│   └── index.html
+│
+├── db/                      # MongoDB init scripts
+│   └── init-replica-set.sh
+│
+└── docker-compose.yml       # Orchestrates everything
+└── README.md                # ← You are here
+```
 
 ---
 
-### 7. Build & run Frontend
+## Quick Start (Docker Compose)
 
-```bash
-# Build your frontend image
-docker build -t frontend-image ./frontend
+1. **Clone the repo**  
+   ```bash
+   git clone <your-repo-url>
+   cd Distributed-systems-Project
+   ```
 
-# Run frontend, exposing port 80 to the host
-docker run -d \
-  --name frontend \
-  --network ds-net \
-  -p 80:80 \
-  frontend-image
-```
-- **Key points:**
-  - Only the UI is reachable on port 80.
-  - It will call `/api/...` on `http://backend:4000` internally.
+2. **Start all services**  
+   ```bash
+   docker network create ds-net
+   docker volume create mongo-primary-data
+   docker volume create mongo-replica1-data
+   docker volume create mongo-replica2-data
+   docker volume create rabbitmq_data
+   docker-compose up -d
+   ```
+
+3. **Wait for initialization**  
+   - Mongo replica set is auto-initiated by `init-replica-set.sh`  
+   - RabbitMQ healthcheck will pass once the broker is ready  
+   - Backend, worker, load-balancer, and frontend will come online  
 
 ---
 
-That’s it—each service lives on `ds-net`, Mongo & RabbitMQ data persist via named volumes, and only the frontend (80) and RabbitMQ UI (15672) are exposed externally.
+## Service Overview & Ports
+
+| Service           | Host Port → Container Port | URL / Notes                          |
+|-------------------|-----------------------------|--------------------------------------|
+| **Frontend**      | `8080 → 80`                 | http://localhost:8080                |
+| **NGINX LB**      | _none exposed_              | _Receives from frontend_             |
+| **Backends**      | internal ports `4000–4003`  | `/health` on each service            |
+| **Worker**        | _none exposed_              | Consumes RabbitMQ `task_queue`       |
+| **RabbitMQ UI**   | `15672 → 15672`             | http://localhost:15672 (user/password) |
+| **MongoDB Primary**   | _none exposed_         | Replica set member                   |
+| **MongoDB Replica1**  | _none exposed_         | Replica set member                   |
+| **MongoDB Replica2**  | _none exposed_         | Replica set member                   |
+
+---
+
+## Component Details
+
+### MongoDB Replica Set
+
+- Three containers: `mongo-primary`, `mongo-replica1`, `mongo-replica2`  
+- Init script `db/init-replica-set.sh`:
+  1. Waits for primary to come online  
+  2. Runs `rs.initiate(...)` to form `rs0`  
+  3. Polls `rs.status().ok` until healthy  
+  4. Creates `sampledb.testData` collection  
+- Data persisted in named volumes  
+
+### RabbitMQ Broker
+
+- Single container `rabbitmq:3-management`  
+- UI on 15672 with default `user` / `password`  
+- Durable queue `task_queue`  
+- Healthcheck ensures broker readiness  
+
+### Backend Microservices
+
+- Four independent services under `backend/services/...`:
+  - **getall** – `GET /api/testdata`  
+  - **getone** – `GET /api/testdata/:value`  
+  - **create** – `POST /api/testdata`  
+  - **update** – `POST /api/testdata/update/:value`  
+- Each:
+  - Reads `PORT` & `INSTANCE` from env  
+  - Connects (with retries) to MongoDB primary  
+  - Connects (with retries) to RabbitMQ, asserts queue  
+  - Enqueues a JSON payload `{ service, instance, ip, ... }` on each API call  
+  - Exposes a `/health` endpoint returning `OK:<INSTANCE>`  
+
+### Worker Service
+
+- `worker.js`:
+  - Connects to RabbitMQ with up to 5 retries  
+  - `prefetch(1)` + durable ack  
+  - Logs every received payload and writes to `worker.log` inside container  
+- No external ports exposed  
+
+### Load Balancer (NGINX)
+
+- Reads dynamic DNS (`resolver 127.0.0.11`)  
+- Defines 4 upstream blocks—one per microservice  
+- Routes:
+  - `/api/testdata` → `getall`  
+  - `/api/testdata/:value` → `getone`  
+  - `/api/testdata` (POST) → `create`  
+  - `/api/testdata/update` → `update`  
+- Healthchecks upstream automatically via Docker‐injected DNS  
+
+### Frontend UI
+
+- Static `index.html` served by `nginx` on port 80  
+- All `/api/` calls proxied to the load-balancer service at `loadbalancer:80`  
+
+---
+
+## Scaling & Health
+
+- **Horizontal scaling**:  
+  ```bash
+  docker-compose up -d --scale backend-getall=3
+  ```
+- **Health endpoints**:  
+  - Backends: `curl http://<container>:<port>/health`  
+  - RabbitMQ: UI or `rabbitmq-diagnostics ping`  
+  - Mongo: `docker exec mongo-primary mongosh --eval "rs.status()"`  
+
+---
+
+## Logs & Monitoring
+
+- **RabbitMQ UI**: http://localhost:15672  
+- **Mongo status**:  
+  ```bash
+  docker exec mongo-primary mongosh --eval "rs.status()"
+  ```  
+- **Worker logs**:
+  ```bash
+  docker logs worker
+  docker exec worker tail -n 100 /usr/src/app/worker.log
+  ```  
+- **Backend logs**:
+  ```bash
+  docker-compose logs backend-getall
+  ```  
+
+---
+
+## Troubleshooting
+
+- **“host not found” in NGINX**  
+  - Confirm `depends_on:` and shared `ds-net` network  
+- **Replica‐set stuck**  
+  - Check `init-replica-set.sh` ran to completion  
+  - Inspect logs: `docker logs mongo-init`  
+- **RabbitMQ connection errors**  
+  - Ensure broker health is `OK` before backends start  
+  - Backends retry 5× with 5s delay  
+
+---
+
